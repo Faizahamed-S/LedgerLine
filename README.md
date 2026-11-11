@@ -90,9 +90,13 @@ demo data.
 
 ### Option A: one command (Docker only)
 
-Prerequisite: Docker Desktop running. Run from the repo root:
+Prerequisites: Docker Desktop running, and ports 5432, 6379, 8080 and 3000 free (a locally installed PostgreSQL
+service, for example, blocks 5432). Containers have fixed names (`ledgerline-*`), so only one copy of the stack
+can run at a time.
 
 ```powershell
+git clone https://github.com/Faizahamed-S/LedgerLine.git
+cd LedgerLine
 docker compose --profile app up --build -d
 ```
 
