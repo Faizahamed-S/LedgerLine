@@ -1,0 +1,65 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: ledgerline-backend
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ledgerline}
+    username: ${DB_APP_USERNAME:ledger_app}
+    password: ${DB_APP_PASSWORD:app_local}
+
+  jackson:
+    deserialization:
+      accept-float-as-int: false
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+    user: ${DB_OWNER_USERNAME:ledger_owner}
+    password: ${DB_OWNER_PASSWORD:owner_local}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+    path: /swagger-ui.html
+    persist-authorization: true
+
+ledgerline:
+  jwt:
+    secret: "${JWT_SECRET:dev-only-secret-change-me-at-least-32-bytes-long!!}"
+    ttl-minutes: ${JWT_TTL_MINUTES:30}
+  cors:
+    allowed-origin: ${FRONTEND_ORIGIN:http://localhost:5173}
+  bootstrap:
+    enabled: ${BOOTSTRAP_ADMIN_ENABLED:false}
+    email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
