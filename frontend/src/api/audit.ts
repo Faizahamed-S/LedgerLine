@@ -1,5 +1,5 @@
 import { request } from './client';
-import type { AuditLogResponse, ReconciliationResponse } from './types';
+import type { AuditLogResponse, ChainVerificationResponse, ReconciliationResponse } from './types';
 
 /** GET /api/audit/log?limit= — newest first, the server caps limit at 500. */
 export function getAuditLog(limit = 100): Promise<AuditLogResponse[]> {
@@ -9,4 +9,9 @@ export function getAuditLog(limit = 100): Promise<AuditLogResponse[]> {
 /** GET /api/audit/reconciliation */
 export function getReconciliation(): Promise<ReconciliationResponse> {
   return request<ReconciliationResponse>('GET', '/api/audit/reconciliation');
+}
+
+/** GET /api/audit/chain — re-verifies every account's ledger hash chain. */
+export function getChainVerification(): Promise<ChainVerificationResponse> {
+  return request<ChainVerificationResponse>('GET', '/api/audit/chain');
 }

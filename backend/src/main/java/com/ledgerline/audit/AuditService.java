@@ -16,6 +16,7 @@ public class AuditService {
 
     public static final String TARGET_USER = "USER";
     public static final String TARGET_ACCOUNT = "ACCOUNT";
+    public static final String TARGET_FLAG = "FLAG";
 
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;

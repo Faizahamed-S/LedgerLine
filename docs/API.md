@@ -339,6 +339,90 @@ Both require **ADMIN** or **AUDITOR**; HOLDER gets `403`. Read-only.
 - **Errors:** `401`, `403`.
 - **Effect on money:** none.
 
+### GET /api/audit/chain
+
+Every ledger entry written since migration V4 carries `prev_hash` and `entry_hash`, forming one hash chain per
+account: `entry_hash = SHA-256 hex of "prev_hash|transaction_id|account_id|amount|balance_after"`, and `prev_hash`
+is the account's previous entry's `entry_hash` (`"GENESIS"` for its first). Entries are chained while the account
+row is locked, so a chain cannot fork. Changing, inserting or deleting any entry, even directly in the database by
+the table owner, makes this check fail.
+
+- **Who:** ADMIN, AUDITOR.
+- **Response `200`:**
+  ```json
+  {
+    "intact": false,
+    "accountsChecked": 3,
+    "entriesChecked": 18,
+    "unchainedLegacyEntries": 0,
+    "breaks": [
+      { "accountId": 3, "entryId": 7, "problem": "HASH_MISMATCH",
+        "expectedHash": "9f2c…", "storedHash": "41ab…" }
+    ],
+    "checkedAt": "2026-11-11T08:06:00Z"
+  }
+  ```
+  `problem` is `HASH_MISMATCH` (the entry's data no longer matches its hash), `PREV_HASH_MISMATCH` (the link to
+  the previous entry is wrong, e.g. an entry was removed or inserted) or `MISSING_HASH`. Entries written before V4
+  (no hashes, before an account's first hashed entry) are counted in `unchainedLegacyEntries`, not as breaks.
+  One consistent snapshot, no locks.
+- **Errors:** `401`, `403`.
+- **Effect on money:** none.
+
+---
+
+## Anomaly flags
+
+**Rule-based anomaly flags (no ML/LLM).** After a money request is recorded and committed, fixed rules are
+evaluated on a background thread in a separate transaction and may insert flags. The machine suggests; a person
+decides. Flagging never blocks or rolls back a money movement, and nothing in this feature freezes an account or
+moves money. Flags and reviews are append-only (triggers forbid UPDATE, DELETE and TRUNCATE).
+
+| Rule | Severity | Raised when |
+|---|---|---|
+| `LARGE_AMOUNT` | HIGH | A POSTED amount is ≥ 5,000,000 paise (₹50,000) |
+| `FOREIGN_PROBE` | HIGH | A request was REJECTED as `NOT_AUTHORISED`: someone tried to move money that isn't theirs |
+| `REPEATED_REFUSALS` | MEDIUM | ≥ 3 REJECTED withdrawals/transfers from the same account within 10 minutes |
+| `RAPID_DEBITS` | MEDIUM | ≥ 5 POSTED withdrawals/transfers from one account within 60 seconds |
+| `NEAR_DRAIN` | LOW | A POSTED debit ≥ 1,000,000 paise left less than 5% of the account's prior balance |
+
+Thresholds are configurable under `ledgerline.anomaly.*` in `application.yml`. Each rule flags a transaction at
+most once (`UNIQUE (transaction_id, rule)`). The flagged account is the deposit's target, otherwise the source.
+
+`FlagResponse`:
+
+```json
+{ "id": 4, "transactionId": 12, "accountId": 3, "rule": "NEAR_DRAIN", "severity": "LOW",
+  "message": "WITHDRAWAL of ₹22,000.00 left ₹500.00 of a prior balance of ₹22,500.00 (under 5%)",
+  "createdAt": "2026-11-11T08:06:00Z",
+  "review": { "decision": "DISMISSED", "note": "Expected: holder emptied their own account.",
+              "reviewerId": 1, "reviewerEmail": "admin@example.com", "reviewedAt": "2026-11-11T08:07:00Z" } }
+```
+
+`review` is `null` while the flag is open.
+
+### GET /api/audit/flags?status=OPEN
+
+- **Who:** ADMIN, AUDITOR.
+- **Query:** `status` = `OPEN` (not reviewed), `REVIEWED`, or omitted for all.
+- **Response `200`:** `FlagResponse[]`, newest first, at most 500.
+- **Errors:** `400` unknown status, `401`, `403`.
+- **Effect on money:** none.
+
+### POST /api/admin/flags/{id}/review
+
+- **Who:** ADMIN only.
+- **Request:**
+  ```json
+  { "decision": "CONFIRMED", "note": "Probe from an unknown holder; freezing separately." }
+  ```
+  `decision` is `DISMISSED` or `CONFIRMED`; `note` is required, at most 500 characters.
+- **Response `200`:** the `FlagResponse` including its review.
+- **Errors:** `400` validation, `401`, `403` not ADMIN, `404` "Flag not found", `409` "Flag has already been
+  reviewed" (each flag can be reviewed once).
+- **Effect on money:** none. `CONFIRMED` only records the decision: it does not freeze the account or move money.
+  To act, freeze the account separately with `PATCH /api/admin/accounts/{id}/status`. Writes audit `FLAG_REVIEWED`.
+
 ---
 
 ## Infrastructure (public)

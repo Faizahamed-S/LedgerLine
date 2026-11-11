@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import * as auditApi from '../api/audit';
 import type { ReconciliationResponse } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
+import { ChainCard } from '../components/ChainCard';
+import { FlagsCard } from '../components/FlagsCard';
 import { Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, SelectField, Table, Td } from '../components/ui';
 import { useAsync } from '../hooks/useAsync';
 import { formatDateTime } from '../lib/format';
@@ -9,17 +12,25 @@ import { formatPaise } from '../lib/money';
 const LIMITS = [50, 100, 500];
 
 export function AuditPage() {
+  const { user } = useAuth();
   const reconciliation = useAsync(() => auditApi.getReconciliation(), []);
   const [limit, setLimit] = useState(100);
   const log = useAsync(() => auditApi.getAuditLog(limit), [limit]);
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  function refreshAll() {
+    reconciliation.reload();
+    log.reload();
+    setRefreshToken((token) => token + 1);
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Audit"
-        subtitle="Read-only. Checks that the books balance, and shows admin and security actions."
+        subtitle="Read-only. Checks that the books balance and the ledger is untampered, and shows anomaly flags and admin and security actions."
         actions={
-          <Button variant="secondary" onClick={() => { reconciliation.reload(); log.reload(); }}>
+          <Button variant="secondary" onClick={refreshAll}>
             Refresh
           </Button>
         }
@@ -32,6 +43,10 @@ export function AuditPage() {
       )}
       {reconciliation.error && <ErrorState message={reconciliation.error} onRetry={reconciliation.reload} />}
       {reconciliation.data && <ReconciliationCard data={reconciliation.data} />}
+
+      <ChainCard refreshToken={refreshToken} />
+
+      <FlagsCard canReview={user?.role === 'ADMIN'} refreshToken={refreshToken} />
 
       <Card>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">

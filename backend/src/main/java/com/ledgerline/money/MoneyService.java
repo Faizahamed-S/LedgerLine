@@ -17,7 +17,9 @@ import com.ledgerline.repository.LedgerEntryRepository;
 import com.ledgerline.repository.LedgerTransactionRepository;
 import com.ledgerline.repository.UserRepository;
 import com.ledgerline.security.CurrentUser;
+import com.ledgerline.ledger.LedgerHash;
 import jakarta.persistence.EntityManager;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -37,7 +39,8 @@ import java.util.stream.LongStream;
  * Every money movement. Each public method is one READ COMMITTED transaction that:
  * (a) hashes the request, (b) claims the idempotency key or replays the stored result,
  * (c) row-locks the accounts in ascending id order, (d) decides under those locks,
- * (e/f) records a REJECTED row or posts the double entry, (g) links the key to the transaction.
+ * (e/f) records a REJECTED row or posts the double entry (extending each account's hash chain), (g) links the key
+ * to the transaction, then publishes {@link MoneyRecordedEvent} for anomaly flagging after commit.
  * The account row locks are the only concurrency control.
  */
 @Service
@@ -63,6 +66,7 @@ public class MoneyService {
     private final LedgerEntryRepository entryRepository;
     private final UserRepository userRepository;
     private final AccountAccessPolicy accessPolicy;
+    private final ApplicationEventPublisher eventPublisher;
 
     public MoneyService(JdbcTemplate jdbcTemplate,
                         EntityManager entityManager,
@@ -70,7 +74,8 @@ public class MoneyService {
                         LedgerTransactionRepository transactionRepository,
                         LedgerEntryRepository entryRepository,
                         UserRepository userRepository,
-                        AccountAccessPolicy accessPolicy) {
+                        AccountAccessPolicy accessPolicy,
+                        ApplicationEventPublisher eventPublisher) {
         this.jdbcTemplate = jdbcTemplate;
         this.entityManager = entityManager;
         this.accountRepository = accountRepository;
@@ -78,6 +83,7 @@ public class MoneyService {
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.accessPolicy = accessPolicy;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -157,14 +163,30 @@ public class MoneyService {
             from.setBalance(fromBalanceAfter);
             to.setBalance(toBalanceAfter);
             transaction = transactionRepository.save(LedgerTransaction.posted(kind, amount, from, to, initiator));
-            entryRepository.save(new LedgerEntry(transaction, from, -amount, fromBalanceAfter));
-            entryRepository.save(new LedgerEntry(transaction, to, amount, toBalanceAfter));
+            entryRepository.save(chainedEntry(transaction, from, -amount, fromBalanceAfter));
+            entryRepository.save(chainedEntry(transaction, to, amount, toBalanceAfter));
             status = HttpStatus.CREATED;
         }
 
         entityManager.flush();
         jdbcTemplate.update(LINK_TRANSACTION_SQL, transaction.getId(), keyId);
+        eventPublisher.publishEvent(new MoneyRecordedEvent(transaction.getId()));
         return new MoneyResult(TransactionResponse.from(transaction), status, false);
+    }
+
+    /**
+     * Extends the account's hash chain. Called only while the account row is locked, so postings to one account
+     * are serialized and the chain cannot fork. A pre-V4 entry without a hash counts as the start of the chain.
+     */
+    private LedgerEntry chainedEntry(LedgerTransaction transaction, Account account, long amount, long balanceAfter) {
+        String prevHash = entryRepository.findTopByAccountIdOrderByIdDesc(account.getId())
+                .map(LedgerEntry::getEntryHash)
+                .orElse(null);
+        if (prevHash == null) {
+            prevHash = LedgerHash.GENESIS;
+        }
+        String entryHash = LedgerHash.compute(prevHash, transaction.getId(), account.getId(), amount, balanceAfter);
+        return new LedgerEntry(transaction, account, amount, balanceAfter, prevHash, entryHash);
     }
 
     private static Optional<Refusal> checkFunds(Account source, long amount) {

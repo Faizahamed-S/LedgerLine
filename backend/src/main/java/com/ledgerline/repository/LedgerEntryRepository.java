@@ -7,8 +7,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, Long> {
+
+    /** The account's newest entry, i.e. the current end of its hash chain. */
+    Optional<LedgerEntry> findTopByAccountIdOrderByIdDesc(Long accountId);
 
     @Query("""
             select e from LedgerEntry e

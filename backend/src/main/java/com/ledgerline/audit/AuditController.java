@@ -15,9 +15,22 @@ import java.util.List;
 public class AuditController {
 
     private final AuditQueryService auditQueryService;
+    private final ChainVerificationService chainVerificationService;
 
-    public AuditController(AuditQueryService auditQueryService) {
+    public AuditController(AuditQueryService auditQueryService, ChainVerificationService chainVerificationService) {
         this.auditQueryService = auditQueryService;
+        this.chainVerificationService = chainVerificationService;
+    }
+
+    @GetMapping("/chain")
+    @Operation(summary = "Verify the ledger hash chain",
+            description = "ADMIN and AUDITOR only. Read-only, moves no money and takes no locks. Re-walks every "
+                    + "account's ledger entries in id order, recomputes each entry_hash and checks each prev_hash "
+                    + "links to the previous entry. Any edited, inserted or deleted entry shows up in breaks, even if "
+                    + "made directly in the database. Entries from before the chain existed are counted as "
+                    + "unchainedLegacyEntries, not breaks.")
+    public ChainVerificationResponse chain() {
+        return chainVerificationService.verify();
     }
 
     @GetMapping("/log")

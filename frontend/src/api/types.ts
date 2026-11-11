@@ -149,6 +149,53 @@ export interface MismatchedAccount {
   ledgerSumPaise: number;
 }
 
+export interface ChainBreak {
+  accountId: number;
+  entryId: number;
+  problem: 'HASH_MISMATCH' | 'PREV_HASH_MISMATCH' | 'MISSING_HASH';
+  expectedHash: string | null;
+  storedHash: string | null;
+}
+
+export interface ChainVerificationResponse {
+  intact: boolean;
+  accountsChecked: number;
+  entriesChecked: number;
+  unchainedLegacyEntries: number;
+  breaks: ChainBreak[];
+  checkedAt: string;
+}
+
+// ---- anomaly flags (rule-based, no ML/LLM) ----
+
+export type FlagSeverity = 'LOW' | 'MEDIUM' | 'HIGH';
+export type FlagDecision = 'DISMISSED' | 'CONFIRMED';
+export type FlagStatus = 'OPEN' | 'REVIEWED';
+
+export interface FlagReviewResponse {
+  decision: FlagDecision;
+  note: string;
+  reviewerId: number;
+  reviewerEmail: string;
+  reviewedAt: string;
+}
+
+export interface FlagResponse {
+  id: number;
+  transactionId: number | null;
+  accountId: number;
+  rule: string;
+  severity: FlagSeverity;
+  message: string;
+  createdAt: string;
+  review: FlagReviewResponse | null;
+}
+
+export interface ReviewFlagRequest {
+  decision: FlagDecision;
+  note: string;
+}
+
 export interface ReconciliationResponse {
   ledgerSumPaise: number;
   customerTotalPaise: number;

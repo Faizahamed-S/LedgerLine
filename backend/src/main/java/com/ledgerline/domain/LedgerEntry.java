@@ -38,6 +38,13 @@ public class LedgerEntry {
     @Column(name = "balance_after", nullable = false)
     private long balanceAfter;
 
+    /** Null only on entries written before the hash chain existed (V4). */
+    @Column(name = "prev_hash")
+    private String prevHash;
+
+    @Column(name = "entry_hash")
+    private String entryHash;
+
     @Generated
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
@@ -45,15 +52,26 @@ public class LedgerEntry {
     protected LedgerEntry() {
     }
 
-    public LedgerEntry(LedgerTransaction transaction, Account account, long amount, long balanceAfter) {
+    public LedgerEntry(LedgerTransaction transaction, Account account, long amount, long balanceAfter,
+                       String prevHash, String entryHash) {
         this.transaction = transaction;
         this.account = account;
         this.amount = amount;
         this.balanceAfter = balanceAfter;
+        this.prevHash = prevHash;
+        this.entryHash = entryHash;
     }
 
     public Long getId() {
         return id;
+    }
+
+    public String getPrevHash() {
+        return prevHash;
+    }
+
+    public String getEntryHash() {
+        return entryHash;
     }
 
     public LedgerTransaction getTransaction() {

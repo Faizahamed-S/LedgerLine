@@ -148,6 +148,6 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
   );
 }
 
-export function Td({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <td className={`whitespace-nowrap px-3 py-2 ${className}`}>{children}</td>;
+export function Td({ children, className = '', wrap = false }: { children: ReactNode; className?: string; wrap?: boolean }) {
+  return <td className={`${wrap ? 'whitespace-normal' : 'whitespace-nowrap'} px-3 py-2 ${className}`}>{children}</td>;
 }

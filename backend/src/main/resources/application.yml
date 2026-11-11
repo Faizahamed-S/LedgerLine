@@ -77,6 +77,14 @@ ledgerline:
     enabled: ${BOOTSTRAP_ADMIN_ENABLED:false}
     email: ${BOOTSTRAP_ADMIN_EMAIL:}
     password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  anomaly:
+    large-amount-paise: 5000000
+    repeated-refusals-count: 3
+    repeated-refusals-window-seconds: 600
+    rapid-debits-count: 5
+    rapid-debits-window-seconds: 60
+    near-drain-min-amount-paise: 1000000
+    near-drain-remaining-percent: 5
   seed:
     enabled: ${SEED_DEMO_DATA:false}
     password: ${SEED_DEMO_PASSWORD:}

@@ -30,6 +30,9 @@ All account permission decisions are made in one place: `com.ledgerline.account.
 | GET | `/api/accounts/{id}/statement` | | ✅ own | ✅ all | ✅ all | Newest first, max 500 lines, plus current balance |
 | GET | `/api/audit/log?limit=100` | | ❌ | ✅ | ✅ | Read-only. Newest first, limit capped at 500 |
 | GET | `/api/audit/reconciliation` | | ❌ | ✅ | ✅ | Read-only. Do the books balance? Lists any mismatched accounts |
+| GET | `/api/audit/chain` | | ❌ | ✅ | ✅ | Read-only. Verifies the per-account ledger hash chain |
+| GET | `/api/audit/flags?status=` | | ❌ | ✅ | ✅ | Read-only. Rule-based anomaly flags (no ML/LLM), OPEN / REVIEWED / all |
+| POST | `/api/admin/flags/{id}/review` | | ❌ | ✅ | ❌ | Records DISMISSED / CONFIRMED with a note, once per flag. Never freezes or moves money |
 
 ❌ = 403. Missing or invalid token = 401.
 
@@ -70,8 +73,14 @@ Fixed windows, counted in Redis. Over the limit: **429** with a `Retry-After: <s
 - Can **never** withdraw from or transfer out of a customer's account.
 
 ### AUDITOR
-- Read-only. Can see every account.
-- Never changes anything and never moves money.
+- Read-only. Can see every account, the audit log, reconciliation, the hash-chain check and the anomaly flags.
+- Never changes anything and never moves money. Cannot review flags.
+
+### Anomaly flags
+- Raised automatically by fixed rules (no ML/LLM) after a money request is recorded. They are suggestions only.
+- Only an ADMIN can review a flag (DISMISSED or CONFIRMED, with a note), once.
+- Neither the rules nor a review ever freeze an account or move money. To act on a flag, an ADMIN freezes the
+  account separately with `PATCH /api/admin/accounts/{id}/status`.
 
 ### The EXTERNAL account
 - Represents money entering or leaving the system ("External World").

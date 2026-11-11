@@ -7,6 +7,22 @@ them, and money moves through deposits, withdrawals and transfers. Every posted 
 transaction with two double-entry ledger lines that sum to zero; refused requests are recorded too. Auditors get
 read-only access to every account, the audit log, and a reconciliation check that the books balance.
 
+### Features
+
+- Three roles (ADMIN, HOLDER, AUDITOR) with permissions checked on the server for every request
+- Account onboarding: holders request accounts, an admin approves, freezes or unfreezes them
+- Deposits, withdrawals and transfers as double-entry ledger postings, under database row locks
+- Idempotent money requests (`Idempotency-Key`): retries and double-clicks never move money twice
+- Refused requests are recorded with a reason; statements show posted and refused lines
+- Append-only ledger and audit log, enforced by database privileges and triggers
+- Per-account SHA-256 hash chain on ledger entries, with a verification endpoint that detects tampering even by
+  the database table owner
+- Rule-based anomaly flags (no ML/LLM): five fixed rules suggest flags after a transaction commits; an admin
+  reviews them. Flags never freeze accounts or move money
+- Reconciliation check that the books balance
+- Redis rate limiting (fail-open) and health/readiness probes
+- React UI for every role, Swagger UI for the API
+
 ## 2. Tech stack
 
 | Layer | Technology |
@@ -35,11 +51,14 @@ read-only access to every account, the audit log, and a reconciliation check tha
   PostgreSQL 16                         Redis 7
   users, accounts, transactions,        rate-limit counters only
   ledger_entries, idempotency_keys,
-  audit_log (Flyway V1-V3)
+  audit_log, anomaly_flags,
+  flag_reviews (Flyway V1-V4)
 ```
 
 The app connects to Postgres as `ledger_app` (least privilege, no DELETE anywhere); Flyway runs migrations as
-`ledger_owner`. `transactions`, `ledger_entries` and `audit_log` are append-only, enforced by triggers.
+`ledger_owner`. `transactions`, `ledger_entries`, `audit_log`, `anomaly_flags` and `flag_reviews` are append-only,
+enforced by triggers. Anomaly rules run after a money transaction commits, on a background thread in their own
+transaction, so they can never block or roll back a money movement.
 
 ```
 LedgerLine/
@@ -49,17 +68,19 @@ LedgerLine/
 │   ├── src/main/java/com/ledgerline/
 │   │   ├── account/              accounts and the central AccountAccessPolicy
 │   │   ├── admin/                admin user and account management
-│   │   ├── audit/                audit log writer, audit log + reconciliation endpoints
+│   │   ├── anomaly/              rule-based anomaly flags and their review
+│   │   ├── audit/                audit log writer, audit log, reconciliation and hash-chain endpoints
 │   │   ├── auth/                 register, login, /me
 │   │   ├── bootstrap/            first-admin bootstrap and demo seed
 │   │   ├── common/               ApiError and the global exception handler
-│   │   ├── config/               OpenAPI config
+│   │   ├── config/               OpenAPI and async executor config
 │   │   ├── domain/               JPA entities and enums
+│   │   ├── ledger/               ledger entry hash chain
 │   │   ├── money/                deposits, withdrawals, transfers, statements
 │   │   ├── ratelimit/            Redis rate limiter and filter
 │   │   ├── repository/           Spring Data repositories
 │   │   └── security/             security config, JWT, current user
-│   ├── src/main/resources/db/migration/   Flyway migrations V1-V3
+│   ├── src/main/resources/db/migration/   Flyway migrations V1-V4
 │   └── src/test/                 integration tests (Testcontainers)
 ├── frontend/                     React app (see frontend/README.md)
 ├── docs/                         ROLES.md, API.md
@@ -72,8 +93,8 @@ LedgerLine/
 | Role | Can do |
 |---|---|
 | HOLDER | Register, request own accounts (max 5), see only own accounts, deposit to / withdraw from / transfer out of own ACTIVE accounts, transfer into any ACTIVE customer account |
-| ADMIN | Manage users (create any role, enable/disable), approve / freeze / unfreeze accounts, see all accounts, deposit into any ACTIVE customer account. Never withdraws or transfers out of a customer's account |
-| AUDITOR | Read-only: all accounts, statements, the audit log and reconciliation. Never moves money |
+| ADMIN | Manage users (create any role, enable/disable), approve / freeze / unfreeze accounts, see all accounts, deposit into any ACTIVE customer account, review anomaly flags. Never withdraws or transfers out of a customer's account |
+| AUDITOR | Read-only: all accounts, statements, the audit log, reconciliation, the hash-chain check and anomaly flags. Never moves money |
 
 The first ADMIN can only be created by the bootstrap at startup; there is no HTTP endpoint for it.
 Full endpoint-by-role table and denial rules: [docs/ROLES.md](docs/ROLES.md).
@@ -229,6 +250,8 @@ ledger is never cleaned between tests; each test creates its own users and accou
 | `audit.AuditEndpointsTest` | HOLDER gets 403 on audit endpoints; AUDITOR reads the log newest first; reconciliation is balanced after real money movement |
 | `bootstrap.DemoSeedTest` | The demo seed creates one login per role, moves money only through `MoneyService` (fixed idempotency keys), leaves the books balanced, and a second run changes nothing |
 | `config.SwaggerTest` | `/v3/api-docs` is public and declares the `bearerAuth` scheme and the `Idempotency-Key` header |
+| `ledger.HashChainTest` | Every new ledger entry links to the previous one from `GENESIS`; the chain verifies as intact. After the table owner disables the triggers and edits one entry's amount, `/api/audit/chain` reports exactly one break at that entry (the test then restores it) |
+| `anomaly.AnomalyTest` | A ₹50,000 deposit raises a HIGH `LARGE_AMOUNT` flag; a holder withdrawing from someone else's account raises `FOREIGN_PROBE`; an admin can review a flag once (second review is 409) and CONFIRMED freezes nothing; HOLDER gets 403 on the flag list and AUDITOR 403 on review; balances are unchanged by flagging |
 
 ### Smoke test
 
