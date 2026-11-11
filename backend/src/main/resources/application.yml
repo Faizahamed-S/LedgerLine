@@ -74,6 +74,9 @@ ledgerline:
     enabled: ${BOOTSTRAP_ADMIN_ENABLED:false}
     email: ${BOOTSTRAP_ADMIN_EMAIL:}
     password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  seed:
+    enabled: ${SEED_DEMO_DATA:false}
+    password: ${SEED_DEMO_PASSWORD:}
   ratelimit:
     enabled: ${RATE_LIMIT_ENABLED:true}
     login-ip:

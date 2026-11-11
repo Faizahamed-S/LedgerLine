@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,8 +24,11 @@ import java.util.Map;
  * there is deliberately no HTTP endpoint for it.
  */
 @Component
+@Order(AdminBootstrapRunner.ORDER)
 @ConditionalOnProperty(name = "ledgerline.bootstrap.enabled", havingValue = "true")
 public class AdminBootstrapRunner implements ApplicationRunner {
+
+    public static final int ORDER = 1;
 
     private static final Logger log = LoggerFactory.getLogger(AdminBootstrapRunner.class);
 
