@@ -1,3 +1,6 @@
+# Default:            docker compose up -d                       -> Postgres + Redis only (for dev mode)
+# Full app (profile): docker compose --profile app up --build -d -> + backend :8080 and frontend :3000
+# All passwords and secrets below are for LOCAL DEVELOPMENT ONLY.
 services:
   postgres:
     image: postgres:16
@@ -6,15 +9,23 @@ services:
       POSTGRES_DB: ledgerline
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      # Used by backend/db/local-init/01-create-roles.sh; must match the backend's DB_*_PASSWORD.
+      LEDGER_OWNER_PASSWORD: owner_local
+      LEDGER_APP_PASSWORD: app_local
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Init scripts run only when the data volume is EMPTY (first start, or after `docker compose down -v`).
+      - ./backend/db/local-init:/docker-entrypoint-initdb.d:ro
+      - ./backend/db/setup-roles.sql:/setup/setup-roles.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ledgerline"]
+      # Over TCP on purpose: during init the temporary server listens on the Unix socket only, so this stays
+      # unhealthy until the roles exist and the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d ledgerline"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
 
   redis:
     image: redis:7
@@ -26,6 +37,45 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    profiles: ["app"]
+    build: ./backend
+    container_name: ledgerline-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/ledgerline
+      DB_APP_USERNAME: ledger_app
+      DB_APP_PASSWORD: app_local
+      DB_OWNER_USERNAME: ledger_owner
+      DB_OWNER_PASSWORD: owner_local
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_SECRET: local-dev-only-jwt-secret-not-for-production-use-0123456789
+      FRONTEND_ORIGIN: http://localhost:3000
+      BOOTSTRAP_ADMIN_ENABLED: "true"
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: change-me-please-123
+      SEED_DEMO_DATA: "true"
+      SEED_DEMO_PASSWORD: demo-password-2026
+    ports:
+      - "8080:8080"
+
+  frontend:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:8080
+    container_name: ledgerline-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:8080"
 
 volumes:
   postgres-data:

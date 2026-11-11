@@ -44,7 +44,8 @@ The app connects to Postgres as `ledger_app` (least privilege, no DELETE anywher
 ```
 LedgerLine/
 ├── backend/                      Spring Boot application
-│   ├── db/setup-roles.sql        one-time script that creates the two database roles
+│   ├── db/setup-roles.sql        creates the two database roles (run once per database)
+│   ├── db/local-init/            runs setup-roles.sql automatically in the local Postgres container
 │   ├── src/main/java/com/ledgerline/
 │   │   ├── account/              accounts and the central AccountAccessPolicy
 │   │   ├── admin/                admin user and account management
@@ -79,7 +80,37 @@ Full endpoint-by-role table and denial rules: [docs/ROLES.md](docs/ROLES.md).
 
 ## 5. Running locally (Windows PowerShell)
 
-Prerequisites: Docker Desktop, JDK 21, Node.js 20.19+ or 22.12+.
+The database roles (`ledger_owner`, `ledger_app`) are created automatically the first time the Postgres
+container starts with an empty volume (`backend/db/local-init/01-create-roles.sh` runs
+`backend/db/setup-roles.sql`). On first start the backend creates the schema (Flyway), the first admin and the
+demo data.
+
+> **If you used an older local database** (created before this automatic setup), reset it once with
+> `docker compose down -v`. This deletes all local data; the next start recreates everything.
+
+### Option A: one command (Docker only)
+
+Prerequisite: Docker Desktop running. Run from the repo root:
+
+```powershell
+docker compose --profile app up --build -d
+```
+
+The first run builds both images and takes several minutes (Maven and npm download their dependencies). Then:
+
+- App: http://localhost:3000
+- API: http://localhost:8080 (Swagger UI: http://localhost:8080/swagger-ui.html)
+
+The backend is ready when `curl.exe http://localhost:8080/actuator/health/readiness` returns `{"status":"UP"}`
+(about 10–30 seconds after the containers start). Follow its log with `docker compose logs -f backend`.
+
+Stop with `docker compose --profile app down` (keeps the data) or `docker compose --profile app down -v`
+(also deletes the database).
+
+### Option B: dev mode (backend and frontend on your machine)
+
+Prerequisites: Docker Desktop, JDK 21, Node.js 20.19+ or 22.12+. Stop Option A first if it is running (it uses
+the same ports).
 
 **1. Start Postgres and Redis**
 
@@ -87,15 +118,7 @@ Prerequisites: Docker Desktop, JDK 21, Node.js 20.19+ or 22.12+.
 docker compose up -d
 ```
 
-**2. Create the database roles** (once per fresh database volume). The passwords below match the local defaults
-in `application.yml`:
-
-```powershell
-Get-Content backend\db\setup-roles.sql | docker compose exec -T postgres psql -U postgres -d ledgerline -v owner_pw=owner_local -v app_pw=app_local
-```
-
-**3. Start the backend** with the first-admin bootstrap and demo seed turned on. Flyway creates the schema on the
-first start.
+**2. Start the backend** with the first-admin bootstrap and demo seed turned on:
 
 ```powershell
 cd backend
@@ -107,11 +130,9 @@ $env:SEED_DEMO_PASSWORD = "demo-password-2026"
 .\mvnw.cmd spring-boot:run
 ```
 
-Both steps are skipped automatically once an admin / the demo users exist. The seed creates
-`holder1@ledgerline.demo`, `holder2@ledgerline.demo` (each with one funded ACTIVE account) and
-`auditor@ledgerline.demo`, all with `SEED_DEMO_PASSWORD`.
+Both steps are skipped automatically once an admin / the demo users exist.
 
-**4. Start the frontend** (second terminal)
+**3. Start the frontend** (second terminal, from the repo root)
 
 ```powershell
 cd frontend
@@ -121,7 +142,20 @@ npm run dev
 
 Open http://localhost:5173.
 
-**5. API docs and health**
+### Local demo credentials (local only)
+
+Both options create these users. They exist only in your local database; never use these passwords anywhere else.
+
+| Role | Email | Password |
+|---|---|---|
+| ADMIN | `admin@example.com` | `change-me-please-123` |
+| HOLDER | `holder1@ledgerline.demo` | `demo-password-2026` |
+| HOLDER | `holder2@ledgerline.demo` | `demo-password-2026` |
+| AUDITOR | `auditor@ledgerline.demo` | `demo-password-2026` |
+
+holder1 and holder2 each have one ACTIVE account, funded by deposits and one transfer from holder1 to holder2.
+
+### API docs and health
 
 - Swagger UI: http://localhost:8080/swagger-ui.html (log in via `POST /api/auth/login`, then "Authorize" with the token)
 - Health: http://localhost:8080/actuator/health, `/actuator/health/liveness`, `/actuator/health/readiness`
@@ -138,6 +172,8 @@ Open http://localhost:5173.
 | `DB_OWNER_PASSWORD` | backend | `owner_local` | Password for `DB_OWNER_USERNAME` |
 | `REDIS_HOST` | backend | `localhost` | Redis host |
 | `REDIS_PORT` | backend | `6379` | Redis port |
+| `REDIS_USERNAME` | backend | empty | Redis ACL username, if the server needs one |
+| `REDIS_PASSWORD` | backend | empty | Redis password; empty means no AUTH (local Docker Redis) |
 | `REDIS_TIMEOUT` | backend | `1s` | Redis command timeout |
 | `REDIS_CONNECT_TIMEOUT` | backend | `1s` | Redis connect timeout |
 | `JWT_SECRET` | backend | dev-only placeholder | HS256 signing secret; startup fails if shorter than 32 bytes |
@@ -214,6 +250,7 @@ Live demo: URL and credentials will be added after deployment.
 - [PROMPTS.md](PROMPTS.md)
 - [docs/API.md](docs/API.md)
 - [docs/ROLES.md](docs/ROLES.md)
+- [docs/DEPLOY.md](docs/DEPLOY.md): deploying to Railway
 - [frontend/README.md](frontend/README.md)
 
 ## 10. Not built / unfinished
