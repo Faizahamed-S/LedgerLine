@@ -28,6 +28,8 @@ All account permission decisions are made in one place: `com.ledgerline.account.
 | POST | `/api/accounts/{id}/withdrawals` | | ✅ own | ❌ | ❌ | Needs `Idempotency-Key`. Account must be ACTIVE |
 | POST | `/api/transfers` | | ✅ from own | ❌ | ❌ | Needs `Idempotency-Key`. Destination: any ACTIVE customer account |
 | GET | `/api/accounts/{id}/statement` | | ✅ own | ✅ all | ✅ all | Newest first, max 500 lines, plus current balance |
+| GET | `/api/audit/log?limit=100` | | ❌ | ✅ | ✅ | Read-only. Newest first, limit capped at 500 |
+| GET | `/api/audit/reconciliation` | | ❌ | ✅ | ✅ | Read-only. Do the books balance? Lists any mismatched accounts |
 
 ❌ = 403. Missing or invalid token = 401.
 
