@@ -1,5 +1,7 @@
 server:
   port: ${PORT:8080}
+  # Tomcat's RemoteIpValve: honours X-Forwarded-For only from internal proxy addresses, so clients cannot spoof it.
+  forward-headers-strategy: native
 
 spring:
   application:
@@ -28,6 +30,9 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Short, so a Redis outage makes the rate limiter fail open quickly instead of stalling requests.
+      timeout: ${REDIS_TIMEOUT:1s}
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:1s}
 
 management:
   endpoints:
@@ -38,6 +43,12 @@ management:
     health:
       probes:
         enabled: true
+      show-details: never
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db,redis
   health:
     livenessstate:
       enabled: true
@@ -63,3 +74,20 @@ ledgerline:
     enabled: ${BOOTSTRAP_ADMIN_ENABLED:false}
     email: ${BOOTSTRAP_ADMIN_EMAIL:}
     password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  ratelimit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    login-ip:
+      limit: ${RATE_LIMIT_LOGIN_IP_LIMIT:20}
+      window-seconds: ${RATE_LIMIT_LOGIN_IP_WINDOW_SECONDS:60}
+    login-email:
+      limit: ${RATE_LIMIT_LOGIN_EMAIL_LIMIT:5}
+      window-seconds: ${RATE_LIMIT_LOGIN_EMAIL_WINDOW_SECONDS:900}
+    register-ip:
+      limit: ${RATE_LIMIT_REGISTER_IP_LIMIT:20}
+      window-seconds: ${RATE_LIMIT_REGISTER_IP_WINDOW_SECONDS:3600}
+    money:
+      limit: ${RATE_LIMIT_MONEY_LIMIT:60}
+      window-seconds: ${RATE_LIMIT_MONEY_WINDOW_SECONDS:60}
+    api:
+      limit: ${RATE_LIMIT_API_LIMIT:300}
+      window-seconds: ${RATE_LIMIT_API_WINDOW_SECONDS:60}

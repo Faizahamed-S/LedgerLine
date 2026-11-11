@@ -36,6 +36,23 @@ response body is the transaction, with the HTTP status from the table below. Rep
 `Idempotency-Key` returns the original status and body plus `Idempotent-Replayed: true`, and moves no money.
 Reusing a key for a different request returns 409.
 
+## Rate limits
+
+Fixed windows, counted in Redis. Over the limit: **429** with a `Retry-After: <seconds>` header and
+"Too many requests, try again in N seconds". Every limit can be changed with an environment variable, and
+`RATE_LIMIT_ENABLED=false` turns them all off.
+
+| Rule | Applies to | Limit | Counted per |
+|---|---|---|---|
+| `login-ip` | `POST /api/auth/login` | 20 / 60 s | client IP |
+| `login-email` | `POST /api/auth/login` | 5 / 900 s, successful or not | email in the request |
+| `register-ip` | `POST /api/auth/register` | 20 / 3600 s | client IP |
+| `money` | `POST` deposits, withdrawals, transfers | 60 / 60 s | user |
+| `api` | every other authenticated `/api/**` request | 300 / 60 s | user |
+
+`/actuator/**`, `/swagger-ui/**` and `/v3/api-docs/**` are never limited. If Redis is down, requests are allowed
+(fail open): the database, not the rate limiter, protects the money.
+
 ## Permission rules
 
 ### HOLDER

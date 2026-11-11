@@ -1,6 +1,9 @@
 package com.ledgerline.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ledgerline.ratelimit.RateLimitFilter;
+import com.ledgerline.ratelimit.RateLimitProperties;
+import com.ledgerline.ratelimit.RedisRateLimiter;
 import com.ledgerline.repository.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,6 +16,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -28,8 +32,11 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
                                                    UserRepository userRepository,
-                                                   ObjectMapper objectMapper) throws Exception {
+                                                   ObjectMapper objectMapper,
+                                                   RedisRateLimiter rateLimiter,
+                                                   RateLimitProperties rateLimitProperties) throws Exception {
         JsonSecurityErrorHandler errorHandler = new JsonSecurityErrorHandler(objectMapper);
+        RateLimitFilter rateLimitFilter = new RateLimitFilter(rateLimiter, rateLimitProperties, objectMapper);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -50,7 +57,8 @@ public class SecurityConfig {
                         .accessDeniedHandler(errorHandler))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(errorHandler)
-                        .accessDeniedHandler(errorHandler));
+                        .accessDeniedHandler(errorHandler))
+                .addFilterAfter(rateLimitFilter, BearerTokenAuthenticationFilter.class);
 
         return http.build();
     }
@@ -66,7 +74,7 @@ public class SecurityConfig {
         config.setAllowedOrigins(List.of(corsProperties.allowedOrigin()));
         config.setAllowedMethods(List.of("GET", "POST", "PATCH"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Idempotency-Key"));
-        config.setExposedHeaders(List.of("Idempotent-Replayed"));
+        config.setExposedHeaders(List.of("Idempotent-Replayed", "Retry-After"));
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -27,6 +28,9 @@ import java.util.function.IntFunction;
  * the container superuser and the permission tests would prove nothing.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// Not in @DynamicPropertySource: dynamic properties outrank @TestPropertySource, so RateLimitTest could not
+// switch rate limiting back on. A subclass's @TestPropertySource overrides this one.
+@TestPropertySource(properties = "ledgerline.ratelimit.enabled=false")
 public abstract class IntegrationTestBase {
 
     protected static final String APP_USER = "ledger_app";
