@@ -1,0 +1,23 @@
+server {
+    listen ${PORT};
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Vite puts content-hashed files in /assets/, so they can be cached forever.
+    location /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # index.html must always be revalidated so a new deploy is picked up immediately.
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    # SPA fallback: client-side routes like /accounts/42 are served index.html.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

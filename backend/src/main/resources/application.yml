@@ -30,6 +30,9 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Railway Redis requires auth. Empty locally: Spring treats an empty password as "no AUTH".
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
       # Short, so a Redis outage makes the rate limiter fail open quickly instead of stalling requests.
       timeout: ${REDIS_TIMEOUT:1s}
       connect-timeout: ${REDIS_CONNECT_TIMEOUT:1s}

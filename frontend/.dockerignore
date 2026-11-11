@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# Local .env files must not leak into the image; VITE_API_URL comes from the build arg.
+.env
+.env.*
