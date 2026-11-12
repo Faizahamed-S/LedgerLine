@@ -42,7 +42,7 @@ You need 4 tools. Maven is **not** needed (the repo includes the Maven wrapper `
 Needs only Git and Docker Desktop (install them as in Step 1). Ports 5432, 6379, 8080 and 3000 must be free.
 
 ```bash
-git clone https://github.com/Faizahamed-S/LedgerLine.git
+git clone <repo-url> LedgerLine
 cd LedgerLine
 docker compose --profile app up --build -d
 ```
@@ -91,7 +91,7 @@ docker run hello-world
 ### Step 2: get the code
 
 ```bash
-git clone https://github.com/Faizahamed-S/LedgerLine.git
+git clone <repo-url> LedgerLine
 cd LedgerLine
 ```
 
