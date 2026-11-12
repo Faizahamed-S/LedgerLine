@@ -36,3 +36,5 @@ Vite reads this at build time, so restart `npm run dev` (or rebuild) after chang
 - `npm run build` type-checks and builds to `dist/`
 - `npm run preview` serves the built `dist/`
 - `npm run typecheck` type-checks only
+
+<!-- rebuild for Railway VITE_API_URL -->
