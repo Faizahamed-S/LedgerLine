@@ -1,285 +1,218 @@
 # LedgerLine
 
-## 1. What LedgerLine is
+A small money-movement system: accounts, deposits, withdrawals and transfers. Money is never created or lost, the same request never moves money twice, and every action, including refused ones, is recorded in an append-only ledger.
 
-LedgerLine is a small banking ledger with a REST API and a web UI. Holders request accounts, an admin approves
-them, and money moves through deposits, withdrawals and transfers. Every posted movement is recorded as one
-transaction with two double-entry ledger lines that sum to zero; refused requests are recorded too. Auditors get
-read-only access to every account, the audit log, and a reconciliation check that the books balance.
+Ledger entries are also hash-chained per account, so tampering is detectable (`GET /api/audit/chain`), and rule-based anomaly flags (no ML/LLM) suggest suspicious activity for an admin to review (`GET /api/audit/flags`). Flags never freeze accounts or move money.
 
-### Features
+- **Backend:** Java 21, Spring Boot 3.5, PostgreSQL 16, Redis 7 (`backend/`)
+- **Frontend:** React + Vite + TypeScript (`frontend/`)
+- **More docs:** [THREATS.md](THREATS.md) · [PROMPTS.md](PROMPTS.md) · [WRITEUP.md](WRITEUP.md) · [docs/API.md](docs/API.md) · [docs/ROLES.md](docs/ROLES.md) · [docs/DEPLOY.md](docs/DEPLOY.md)
 
-- Three roles (ADMIN, HOLDER, AUDITOR) with permissions checked on the server for every request
-- Account onboarding: holders request accounts, an admin approves, freezes or unfreezes them
-- Deposits, withdrawals and transfers as double-entry ledger postings, under database row locks
-- Idempotent money requests (`Idempotency-Key`): retries and double-clicks never move money twice
-- Refused requests are recorded with a reason; statements show posted and refused lines
-- Append-only ledger and audit log, enforced by database privileges and triggers
-- Per-account SHA-256 hash chain on ledger entries, with a verification endpoint that detects tampering even by
-  the database table owner
-- Rule-based anomaly flags (no ML/LLM): five fixed rules suggest flags after a transaction commits; an admin
-  reviews them. Flags never freeze accounts or move money
-- Reconciliation check that the books balance
-- Redis rate limiting (fail-open) and health/readiness probes
-- React UI for every role, Swagger UI for the API
+---
 
-## 2. Tech stack
+## Run it locally
 
-| Layer | Technology |
-|---|---|
-| Backend | Java 21, Spring Boot 3.5 (Web, Security, Data JPA, Validation, Actuator, Data Redis), Maven wrapper |
-| Auth | Spring Security OAuth2 resource server, HS256 JWT (Nimbus), BCrypt password hashing |
-| Database | PostgreSQL 16, Flyway migrations, Hibernate (`ddl-auto: validate`) |
-| Rate limiting | Redis 7, fixed-window counters via a Lua script |
-| API docs | springdoc-openapi 2.8 (Swagger UI) |
-| Frontend | React 18, TypeScript, Vite 7, react-router-dom 6, Tailwind CSS v4 |
-| Tests | JUnit 5, Testcontainers (real Postgres and Redis), Spring Boot Test |
-| Local infra | Docker Compose |
+You need 4 tools. Maven is **not** needed (the repo includes the Maven wrapper `mvnw`).
 
-## 3. Architecture
+| Tool | Version | Used for |
+|---|---|---|
+| Git | any | cloning the repo |
+| Java JDK | **21** | backend |
+| Node.js | **20.19+ or 22.12+** (includes npm) | frontend |
+| Docker Desktop | any recent | runs PostgreSQL and Redis (and the tests) |
 
-```
-  Browser
-  React SPA (frontend/, Vite dev server :5173)
-        |
-        |  JSON over HTTP, Authorization: Bearer <JWT>
-        v
-  Spring Boot API (backend/, :8080)
-  security filter chain -> rate limit filter -> controllers -> services
-        |                                   |
-        v                                   v
-  PostgreSQL 16                         Redis 7
-  users, accounts, transactions,        rate-limit counters only
-  ledger_entries, idempotency_keys,
-  audit_log, anomaly_flags,
-  flag_reviews (Flyway V1-V4)
-```
+### Option A: one command
 
-The app connects to Postgres as `ledger_app` (least privilege, no DELETE anywhere); Flyway runs migrations as
-`ledger_owner`. `transactions`, `ledger_entries`, `audit_log`, `anomaly_flags` and `flag_reviews` are append-only,
-enforced by triggers. Anomaly rules run after a money transaction commits, on a background thread in their own
-transaction, so they can never block or roll back a money movement.
+Needs only Git and Docker Desktop (install them as in Step 1). Ports 5432, 6379, 8080 and 3000 must be free.
 
-```
-LedgerLine/
-├── backend/                      Spring Boot application
-│   ├── db/setup-roles.sql        creates the two database roles (run once per database)
-│   ├── db/local-init/            runs setup-roles.sql automatically in the local Postgres container
-│   ├── src/main/java/com/ledgerline/
-│   │   ├── account/              accounts and the central AccountAccessPolicy
-│   │   ├── admin/                admin user and account management
-│   │   ├── anomaly/              rule-based anomaly flags and their review
-│   │   ├── audit/                audit log writer, audit log, reconciliation and hash-chain endpoints
-│   │   ├── auth/                 register, login, /me
-│   │   ├── bootstrap/            first-admin bootstrap and demo seed
-│   │   ├── common/               ApiError and the global exception handler
-│   │   ├── config/               OpenAPI and async executor config
-│   │   ├── domain/               JPA entities and enums
-│   │   ├── ledger/               ledger entry hash chain
-│   │   ├── money/                deposits, withdrawals, transfers, statements
-│   │   ├── ratelimit/            Redis rate limiter and filter
-│   │   ├── repository/           Spring Data repositories
-│   │   └── security/             security config, JWT, current user
-│   ├── src/main/resources/db/migration/   Flyway migrations V1-V4
-│   └── src/test/                 integration tests (Testcontainers)
-├── frontend/                     React app (see frontend/README.md)
-├── docs/                         ROLES.md, API.md
-├── scripts/smoke-test1.ps1       end-to-end smoke test against a running backend
-└── docker-compose.yml            Postgres 16 + Redis 7 for local development
-```
-
-## 4. Roles
-
-| Role | Can do |
-|---|---|
-| HOLDER | Register, request own accounts (max 5), see only own accounts, deposit to / withdraw from / transfer out of own ACTIVE accounts, transfer into any ACTIVE customer account |
-| ADMIN | Manage users (create any role, enable/disable), approve / freeze / unfreeze accounts, see all accounts, deposit into any ACTIVE customer account, review anomaly flags. Never withdraws or transfers out of a customer's account |
-| AUDITOR | Read-only: all accounts, statements, the audit log, reconciliation, the hash-chain check and anomaly flags. Never moves money |
-
-The first ADMIN can only be created by the bootstrap at startup; there is no HTTP endpoint for it.
-Full endpoint-by-role table and denial rules: [docs/ROLES.md](docs/ROLES.md).
-
-## 5. Running locally (Windows PowerShell)
-
-The database roles (`ledger_owner`, `ledger_app`) are created automatically the first time the Postgres
-container starts with an empty volume (`backend/db/local-init/01-create-roles.sh` runs
-`backend/db/setup-roles.sql`). On first start the backend creates the schema (Flyway), the first admin and the
-demo data.
-
-> **If you used an older local database** (created before this automatic setup), reset it once with
-> `docker compose down -v`. This deletes all local data; the next start recreates everything.
-
-### Option A: one command (Docker only)
-
-Prerequisites: Docker Desktop running, and ports 5432, 6379, 8080 and 3000 free (a locally installed PostgreSQL
-service, for example, blocks 5432). Containers have fixed names (`ledgerline-*`), so only one copy of the stack
-can run at a time.
-
-```powershell
+```bash
 git clone https://github.com/Faizahamed-S/LedgerLine.git
 cd LedgerLine
 docker compose --profile app up --build -d
 ```
 
-The first run builds both images and takes several minutes (Maven and npm download their dependencies). Then:
+The first run builds the backend and frontend images (several minutes). Then open **http://localhost:3000** and log in with the credentials in Step 7. The API is at http://localhost:8080; it's ready when http://localhost:8080/actuator/health/readiness shows `{"status":"UP"}`.
 
-- App: http://localhost:3000
-- API: http://localhost:8080 (Swagger UI: http://localhost:8080/swagger-ui.html)
+Stop with `docker compose --profile app down` (add `-v` to also delete the data).
 
-The backend is ready when `curl.exe http://localhost:8080/actuator/health/readiness` returns `{"status":"UP"}`
-(about 10–30 seconds after the containers start). Follow its log with `docker compose logs -f backend`.
+### Option B: dev mode
 
-Stop with `docker compose --profile app down` (keeps the data) or `docker compose --profile app down -v`
-(also deletes the database).
+The backend and frontend run on your machine; only PostgreSQL and Redis run in Docker. Stop Option A first if it is running (same ports).
 
-### Option B: dev mode (backend and frontend on your machine)
+### Step 1: install the tools (skip any you already have)
 
-Prerequisites: Docker Desktop, JDK 21, Node.js 20.19+ or 22.12+. Stop Option A first if it is running (it uses
-the same ports).
-
-**1. Start Postgres and Redis**
-
+**Windows** (PowerShell as Administrator):
 ```powershell
+winget install --id Git.Git -e
+winget install --id EclipseAdoptium.Temurin.21.JDK -e
+winget install --id OpenJS.NodeJS.LTS -e
+wsl --install
+winget install --id Docker.DockerDesktop -e
+```
+
+**macOS** (with [Homebrew](https://brew.sh)):
+```bash
+brew install git node
+brew install --cask temurin@21 docker
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update && sudo apt install -y git openjdk-21-jdk
+# Node 20+: https://nodejs.org/en/download  ·  Docker: https://docs.docker.com/engine/install/
+```
+
+Then **restart your computer**, open **Docker Desktop**, and wait until it says **"Engine running"**.
+
+Check everything in a **new** terminal:
+```bash
+git --version
+java -version        # must say 21
+node -v              # must be v20.19+ or v22.12+
+docker run hello-world
+```
+
+### Step 2: get the code
+
+```bash
+git clone https://github.com/Faizahamed-S/LedgerLine.git
+cd LedgerLine
+```
+
+### Step 3: start PostgreSQL and Redis
+
+From the repo root:
+```bash
 docker compose up -d
 ```
 
-**2. Start the backend** with the first-admin bootstrap and demo seed turned on:
+### Step 4: database roles (automatic)
 
+The app uses two database logins: `ledger_owner` runs migrations, and `ledger_app` is the running app, which **cannot** edit or delete ledger rows. They are created automatically by `backend/db/local-init/01-create-roles.sh` the first time the Postgres container starts with an empty volume, so there is nothing to do.
+
+Only if your database volume is older than that: reset it once with `docker compose down -v` and redo Step 3, or create the roles manually:
+
+**Windows (PowerShell):**
+```powershell
+Get-Content backend\db\setup-roles.sql | docker compose exec -T postgres psql -U postgres -d ledgerline -v owner_pw=owner_local -v app_pw=app_local
+```
+
+**macOS / Linux:**
+```bash
+cat backend/db/setup-roles.sql | docker compose exec -T postgres psql -U postgres -d ledgerline -v owner_pw=owner_local -v app_pw=app_local
+```
+
+Expected output: `CREATE ROLE`, `CREATE ROLE`, `ALTER SCHEMA`, `REVOKE`.
+If it says the role already exists, it was done before and you can carry on.
+
+### Step 5: start the backend (terminal 1)
+
+The first start creates an admin user and some demo data.
+
+**Windows (PowerShell):**
 ```powershell
 cd backend
-$env:BOOTSTRAP_ADMIN_ENABLED = "true"
-$env:BOOTSTRAP_ADMIN_EMAIL = "admin@example.com"
-$env:BOOTSTRAP_ADMIN_PASSWORD = "change-me-please-123"
-$env:SEED_DEMO_DATA = "true"
-$env:SEED_DEMO_PASSWORD = "demo-password-2026"
+$env:BOOTSTRAP_ADMIN_ENABLED="true"; $env:BOOTSTRAP_ADMIN_EMAIL="admin@example.com"; $env:BOOTSTRAP_ADMIN_PASSWORD="change-me-please-123"
+$env:SEED_DEMO_DATA="true"; $env:SEED_DEMO_PASSWORD="demo-password-2026"
 .\mvnw.cmd spring-boot:run
 ```
 
-Both steps are skipped automatically once an admin / the demo users exist.
+**macOS / Linux:**
+```bash
+cd backend
+chmod +x mvnw
+BOOTSTRAP_ADMIN_ENABLED=true BOOTSTRAP_ADMIN_EMAIL=admin@example.com BOOTSTRAP_ADMIN_PASSWORD=change-me-please-123 \
+SEED_DEMO_DATA=true SEED_DEMO_PASSWORD=demo-password-2026 \
+./mvnw spring-boot:run
+```
 
-**3. Start the frontend** (second terminal, from the repo root)
+The first run downloads dependencies (2–5 minutes). It's ready when the log shows `Started LedgerlineApplication`.
 
-```powershell
+Check it in a browser: http://localhost:8080/actuator/health should show `{"status":"UP"...}`
+
+### Step 6: start the frontend (terminal 2)
+
+From the repo root:
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173.
+Open **http://localhost:5173**.
 
-### Local demo credentials (local only)
-
-Both options create these users. They exist only in your local database; never use these passwords anywhere else.
+### Step 7: log in
 
 | Role | Email | Password |
 |---|---|---|
-| ADMIN | `admin@example.com` | `change-me-please-123` |
-| HOLDER | `holder1@ledgerline.demo` | `demo-password-2026` |
-| HOLDER | `holder2@ledgerline.demo` | `demo-password-2026` |
-| AUDITOR | `auditor@ledgerline.demo` | `demo-password-2026` |
+| Admin | `admin@example.com` | `change-me-please-123` |
+| Holder | `holder1@ledgerline.demo` | `demo-password-2026` |
+| Holder | `holder2@ledgerline.demo` | `demo-password-2026` |
+| Auditor | `auditor@ledgerline.demo` | `demo-password-2026` |
 
-holder1 and holder2 each have one ACTIVE account, funded by deposits and one transfer from holder1 to holder2.
+These are **local demo credentials only**.
 
-### API docs and health
+Interactive API docs: **http://localhost:8080/swagger-ui.html**. Log in with `POST /api/auth/login`, copy the `token`, click **Authorize**, and paste it.
 
-- Swagger UI: http://localhost:8080/swagger-ui.html (log in via `POST /api/auth/login`, then "Authorize" with the token)
-- Health: http://localhost:8080/actuator/health, `/actuator/health/liveness`, `/actuator/health/readiness`
+---
 
-## 6. Environment variables
+## Run the tests
 
-| Variable | Read by | Default | Meaning |
-|---|---|---|---|
-| `PORT` | backend | `8080` | HTTP port |
-| `DB_URL` | backend | `jdbc:postgresql://localhost:5432/ledgerline` | JDBC URL, used by the app and by Flyway |
-| `DB_APP_USERNAME` | backend | `ledger_app` | Role the application connects as |
-| `DB_APP_PASSWORD` | backend | `app_local` | Password for `DB_APP_USERNAME` |
-| `DB_OWNER_USERNAME` | backend | `ledger_owner` | Role Flyway runs migrations as |
-| `DB_OWNER_PASSWORD` | backend | `owner_local` | Password for `DB_OWNER_USERNAME` |
-| `REDIS_HOST` | backend | `localhost` | Redis host |
-| `REDIS_PORT` | backend | `6379` | Redis port |
-| `REDIS_USERNAME` | backend | empty | Redis ACL username, if the server needs one |
-| `REDIS_PASSWORD` | backend | empty | Redis password; empty means no AUTH (local Docker Redis) |
-| `REDIS_TIMEOUT` | backend | `1s` | Redis command timeout |
-| `REDIS_CONNECT_TIMEOUT` | backend | `1s` | Redis connect timeout |
-| `JWT_SECRET` | backend | dev-only placeholder | HS256 signing secret; startup fails if shorter than 32 bytes |
-| `JWT_TTL_MINUTES` | backend | `30` | Token lifetime |
-| `FRONTEND_ORIGIN` | backend | `http://localhost:5173` | The only origin allowed by CORS |
-| `BOOTSTRAP_ADMIN_ENABLED` | backend | `false` | Create the first ADMIN at startup if no admin exists |
-| `BOOTSTRAP_ADMIN_EMAIL` | backend | empty | Email of that admin (required when enabled) |
-| `BOOTSTRAP_ADMIN_PASSWORD` | backend | empty | Password of that admin, at least 12 characters (required when enabled) |
-| `SEED_DEMO_DATA` | backend | `false` | Create the demo users, accounts and money at startup if not present |
-| `SEED_DEMO_PASSWORD` | backend | empty | Password for all demo users, at least 12 characters (required when enabled) |
-| `SWAGGER_ENABLED` | backend | `true` | Serve `/swagger-ui.html` and `/v3/api-docs` |
-| `RATE_LIMIT_ENABLED` | backend | `true` | Turn all rate limits on or off |
-| `RATE_LIMIT_LOGIN_IP_LIMIT` | backend | `20` | Logins per client IP per window |
-| `RATE_LIMIT_LOGIN_IP_WINDOW_SECONDS` | backend | `60` | Window for the rule above |
-| `RATE_LIMIT_LOGIN_EMAIL_LIMIT` | backend | `5` | Login attempts per email per window |
-| `RATE_LIMIT_LOGIN_EMAIL_WINDOW_SECONDS` | backend | `900` | Window for the rule above |
-| `RATE_LIMIT_REGISTER_IP_LIMIT` | backend | `20` | Registrations per client IP per window |
-| `RATE_LIMIT_REGISTER_IP_WINDOW_SECONDS` | backend | `3600` | Window for the rule above |
-| `RATE_LIMIT_MONEY_LIMIT` | backend | `60` | Deposits + withdrawals + transfers per user per window |
-| `RATE_LIMIT_MONEY_WINDOW_SECONDS` | backend | `60` | Window for the rule above |
-| `RATE_LIMIT_API_LIMIT` | backend | `300` | Other authenticated `/api/**` requests per user per window |
-| `RATE_LIMIT_API_WINDOW_SECONDS` | backend | `60` | Window for the rule above |
-| `VITE_API_URL` | frontend (build time) | `http://localhost:8080` | Backend base URL |
+Docker must be running; the tests start their own PostgreSQL and Redis containers.
 
-The database role passwords themselves are set once by `backend/db/setup-roles.sql` (psql variables `owner_pw`
-and `app_pw`) and must match `DB_OWNER_PASSWORD` / `DB_APP_PASSWORD`.
-
-## 7. Tests
-
-### Automated tests
-
-```powershell
+```bash
 cd backend
-.\mvnw.cmd test
+./mvnw test          # Windows: .\mvnw.cmd test
 ```
 
-Docker must be running: the tests start real `postgres:16` and `redis:7` containers with Testcontainers. The app
-connects as `ledger_app` and Flyway as `ledger_owner`, as in production, so permission tests are meaningful. The
-ledger is never cleaned between tests; each test creates its own users and accounts.
+They cover conservation of money, no overdraft under 50 concurrent requests, idempotent retries, one user not being able to move another's money, and ledger rows not being editable.
 
-| Test class | What it proves |
-|---|---|
-| `money.ConcurrencyTest` | 50 concurrent withdrawals of 3,000 from 10,000: exactly 3 post and 47 are refused, final balance 1,000 and equal to the ledger. 100 opposing concurrent transfers finish without deadlock and conserve the total |
-| `money.IdempotencyTest` | Same key twice or from 20 threads: one transaction, identical replayed responses, correct `replay_count`. Same key with a different body: 409. Keys are per user. A refused request replays as refused even after funds arrive |
-| `money.AuthorisationTest` | A holder cannot withdraw or transfer from another holder's account (404, recorded), ADMIN cannot withdraw (403), AUDITOR cannot move money (403), no token is 401, `role` in register is ignored, HOLDER cannot call admin endpoints, PENDING accounts refuse money (409) |
-| `money.ConservationTest` | 200 random concurrent operations from 10 threads: ledger sums to 0, every balance equals its ledger entries, every posted transaction has 2 entries summing to 0, no negative customer balance, customers = −EXTERNAL |
-| `ledger.LedgerImmutabilityTest` | `ledger_app` cannot UPDATE/DELETE ledger tables (permission denied); even `ledger_owner` is stopped by the append-only triggers, including TRUNCATE |
-| `ratelimit.RateLimitTest` | The 4th login for one email gets 429 with `Retry-After`; another email still works; the throttled attempt writes no audit row |
-| `audit.AuditEndpointsTest` | HOLDER gets 403 on audit endpoints; AUDITOR reads the log newest first; reconciliation is balanced after real money movement |
-| `bootstrap.DemoSeedTest` | The demo seed creates one login per role, moves money only through `MoneyService` (fixed idempotency keys), leaves the books balanced, and a second run changes nothing |
-| `config.SwaggerTest` | `/v3/api-docs` is public and declares the `bearerAuth` scheme and the `Idempotency-Key` header |
-| `ledger.HashChainTest` | Every new ledger entry links to the previous one from `GENESIS`; the chain verifies as intact. After the table owner disables the triggers and edits one entry's amount, `/api/audit/chain` reports exactly one break at that entry (the test then restores it) |
-| `anomaly.AnomalyTest` | A ₹50,000 deposit raises a HIGH `LARGE_AMOUNT` flag; a holder withdrawing from someone else's account raises `FOREIGN_PROBE`; an admin can review a flag once (second review is 409) and CONFIRMED freezes nothing; HOLDER gets 403 on the flag list and AUDITOR 403 on review; balances are unchanged by flagging |
-
-### Smoke test
-
-`scripts/smoke-test1.ps1` drives a running backend over HTTP: every endpoint plus the main attacks (cross-account
-access, role escalation, replays, bad amounts), then checks the ledger in the local Docker database.
-
+**End-to-end smoke test** (backend running, from the repo root, Windows PowerShell):
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\smoke-test1.ps1
-powershell -ExecutionPolicy Bypass -File .\scripts\smoke-test1.ps1 -BaseUrl https://your-backend.example.com -SkipDbCheck
 ```
 
-It logs in as `admin@example.com` / `change-me-please-123` unless you pass `-AdminEmail` / `-AdminPassword`.
-Each run logs the admin in once and registers twice, so with rate limits on, repeated runs hit the login-per-email
-limit (5 per 15 minutes); start the backend with `RATE_LIMIT_ENABLED=false` for repeated local runs.
+---
 
-## 8. Demo credentials
+## Stop and reset
 
-Live demo: URL and credentials will be added after deployment.
+```bash
+# stop backend / frontend: Ctrl+C in their terminals
+docker compose down        # stop Postgres and Redis, keep data
+docker compose down -v     # stop AND delete all data (roles are recreated on the next docker compose up -d)
+```
 
-## 9. Links
+---
 
-- [THREATS.md](THREATS.md)
-- [PROMPTS.md](PROMPTS.md)
-- [docs/API.md](docs/API.md)
-- [docs/ROLES.md](docs/ROLES.md)
-- [docs/DEPLOY.md](docs/DEPLOY.md): deploying to Railway
-- [frontend/README.md](frontend/README.md)
+## Troubleshooting
 
-## 10. Not built / unfinished
+| Problem | Fix |
+|---|---|
+| `git` / `java` / `docker` / `node` "not recognized" | Close **all** terminals and your editor, then reopen them. If it still fails, restart the PC. |
+| `docker` commands fail | Open Docker Desktop and wait for "Engine running". On Windows, run `wsl --update`. |
+| Backend: `Flyway ... permission denied` or `password authentication failed for user "ledger_owner"` | The database volume is older than the automatic role setup. Reset with `docker compose down -v` and redo Step 3, or run the manual command in Step 4. |
+| Backend: `Port 8080 already in use` | Another backend is still running. Stop it, or start with `PORT=8081` and set `VITE_API_URL=http://localhost:8081` for the frontend. |
+| Frontend shows network or CORS errors | The backend must be running on port 8080, and the frontend must be opened at `http://localhost:5173` (Option A: `http://localhost:3000`). |
+| `429 Too many requests` while testing | Login is rate-limited. Restart the backend with `RATE_LIMIT_ENABLED=false` for local testing. |
+| Demo users missing | The seed only runs with `SEED_DEMO_DATA=true`. Restart the backend with the Step 5 variables. |
+| `./mvnw: Permission denied` (macOS/Linux) | `chmod +x mvnw` |
 
-See THREATS.md "Not built".
+---
+
+## For AI assistants helping someone run this
+
+Facts you need:
+- **Monorepo:** `backend/` (Spring Boot, Maven wrapper) and `frontend/` (Vite). In dev mode (Option B) both run on the host and only Postgres and Redis run in Docker (`docker-compose.yml`, container names `ledgerline-postgres` and `ledgerline-redis`). Option A (`docker compose --profile app up --build -d`) also runs them in Docker as `ledgerline-backend` and `ledgerline-frontend`.
+- **Ports:** Postgres 5432, Redis 6379, backend 8080, frontend 5173 (dev mode) or 3000 (Option A).
+- **Order matters:**
+  1. `docker compose up -d`
+  2. **roles exist BEFORE the first backend start.** Flyway logs in as `ledger_owner`. On a fresh volume `backend/db/local-init/01-create-roles.sh` creates the roles automatically, and the Postgres healthcheck stays unhealthy until that is done. On an older volume, run the Step 4 manual command or reset with `docker compose down -v`.
+  3. backend
+  4. frontend
+- **DB logins:** local defaults are `ledger_owner`/`owner_local` (migrations) and `ledger_app`/`app_local` (runtime). The superuser `postgres`/`postgres` is only used to create the roles.
+- **Schema:** Flyway migrations in `backend/src/main/resources/db/migration`. Hibernate runs with `ddl-auto: validate`, so startup fails if entities and tables disagree.
+- **Local backend config:** `application.yml` has working defaults for everything. Only the bootstrap and seed variables need setting, on the first start.
+- **Frontend API URL:** from `VITE_API_URL`, default `http://localhost:8080`. No `.env` file needed locally.
+- **Verify the backend:** `GET http://localhost:8080/actuator/health/readiness` returns 200 when Postgres and Redis are both reachable, and 503 otherwise.
+- **Tests:** use Testcontainers, so Docker is required. No local database setup is needed for tests.
+- **Never** suggest `ddl-auto: update`, connecting the app as `postgres`, or editing ledger rows. The design forbids all three.
