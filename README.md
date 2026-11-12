@@ -10,6 +10,22 @@ Ledger entries are also hash-chained per account, so tampering is detectable (`G
 
 ---
 
+## Live demo
+
+- **Frontend:** https://lovely-bravery-production-063ec372.up.railway.app
+- **Backend API / Swagger:** https://ledgerline-production-571b1eda.up.railway.app/swagger-ui.html
+
+Demo credentials (demo data only):
+
+| Role | Email | Password |
+|---|---|---|
+| Admin | `admin@ledgerline.demo` | `Admin-Demo-2026` |
+| Holder | `holder1@ledgerline.demo` | `Holder-Demo-2026` |
+| Holder | `holder2@ledgerline.demo` | `Holder-Demo-2026` |
+| Auditor | `auditor@ledgerline.demo` | `Holder-Demo-2026` |
+
+---
+
 ## Run it locally
 
 You need 4 tools. Maven is **not** needed (the repo includes the Maven wrapper `mvnw`).
