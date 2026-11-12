@@ -1,6 +1,7 @@
+import { API_URL } from '../config';
 import type { ApiError, UserResponse } from './types';
 
-export const API_URL: string = (import.meta.env.VITE_API_URL || 'http://localhost:8080').replace(/\/+$/, '');
+export { API_URL };
 
 const TOKEN_KEY = 'ledgerline.token';
 const USER_KEY = 'ledgerline.user';
@@ -87,6 +88,9 @@ export function errorMessage(response: RawResponse): string {
 
 /** The one place that talks to the backend. Throws NetworkError only when there is no HTTP answer at all. */
 export async function send(method: string, path: string, options: RequestOptions = {}): Promise<RawResponse> {
+  if (!API_URL) {
+    throw new Error('This app is not configured with a backend URL (VITE_API_URL). Please contact the operator.');
+  }
   const headers: Record<string, string> = { Accept: 'application/json' };
   const token = session.getToken();
   if (token && options.auth !== false) headers.Authorization = `Bearer ${token}`;

@@ -16,6 +16,11 @@ server {
         add_header Cache-Control "no-cache";
     }
 
+    # Runtime config, rewritten at every container start: never cache it.
+    location = /config.js {
+        add_header Cache-Control "no-store";
+    }
+
     # SPA fallback: client-side routes like /accounts/42 are served index.html.
     location / {
         try_files $uri $uri/ /index.html;

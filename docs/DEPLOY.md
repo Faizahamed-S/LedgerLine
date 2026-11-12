@@ -189,9 +189,13 @@ match the passwords you passed as `owner_pw` / `app_pw`. Run step 2 (once), chec
 `FRONTEND_ORIGIN` on the backend must equal the frontend URL exactly: same `https://`, same host, no trailing
 slash, no path. Fix it and let the backend redeploy.
 
-**The deployed frontend calls `http://localhost:8080`**
-`VITE_API_URL` is read at **build** time, not at runtime. It was missing or wrong when the frontend was built.
-Set it on the frontend service and **redeploy the frontend** (a restart is not enough; it must rebuild).
+**The frontend says "not configured with a backend URL", or calls the wrong backend**
+The app reads `VITE_API_URL` at container start (written into `/config.js`) and, as a fallback, the value baked
+in at build time. A production build never falls back to localhost. Open the browser console: the app logs
+`LedgerLine API base URL: <url>` at startup, and `https://<frontend URL>/config.js` shows the runtime value. Make
+sure `VITE_API_URL` is set on the **frontend** service, in the **same environment**, and that pending variable
+changes have been applied (Railway stages variable edits until you deploy them). Then redeploy the frontend. The
+build log prints `WARNING: VITE_API_URL build arg is empty` when the build did not receive it.
 
 **Backend logs `NOAUTH Authentication required` or readiness stays DOWN because of Redis**
 `REDIS_PASSWORD` is missing or wrong. Set it to `${{Redis.REDISPASSWORD}}` and redeploy. If your Redis requires a

@@ -31,6 +31,10 @@ VITE_API_URL=https://your-backend.example.com
 
 Vite reads this at build time, so restart `npm run dev` (or rebuild) after changing it.
 
+In the Docker image, a runtime `VITE_API_URL` environment variable also works: at container start it is written
+into `/config.js` and takes precedence over the build-time value. Production builds never fall back to
+`localhost`; the browser console logs `LedgerLine API base URL: <url>` at startup.
+
 ## Other scripts
 
 - `npm run build` type-checks and builds to `dist/`
